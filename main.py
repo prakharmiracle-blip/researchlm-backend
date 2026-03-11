@@ -276,12 +276,13 @@ async def notebooklm_pipeline(req: NotebookLMRequest):
                 result["flashcards_url"] = f"/api/download/flashcards/{nb.id}"
 
     except Exception as e:
+        import traceback
         error_msg = str(e)
+        tb = traceback.format_exc()
+        print(f"NotebookLM ERROR: {error_msg}")
+        print(f"Traceback: {tb}")
         if "auth" in error_msg.lower() or "login" in error_msg.lower() or "401" in error_msg:
-            raise HTTPException(
-                401,
-                "NotebookLM authentication failed. Run 'notebooklm login' on the server."
-            )
+            raise HTTPException(401, f"NotebookLM auth failed: {error_msg[:300]}")
         raise HTTPException(500, f"NotebookLM pipeline error: {error_msg[:300]}")
 
     return result
