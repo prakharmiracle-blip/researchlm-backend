@@ -204,6 +204,16 @@ async def notebooklm_pipeline(req: NotebookLMRequest):
     if not req.urls:
         raise HTTPException(400, "No URLs provided")
 
+    # Write auth token from env variable to disk so NotebookLM can read it
+    auth_json = os.environ.get("NOTEBOOKLM_AUTH_JSON")
+    if auth_json:
+        auth_dir = Path.home() / ".notebooklm"
+        auth_dir.mkdir(parents=True, exist_ok=True)
+        (auth_dir / "storage_state.json").write_text(auth_json)
+        print("Auth token written to disk from environment variable")
+    else:
+        raise HTTPException(401, "NOTEBOOKLM_AUTH_JSON not set in Render environment variables")
+
     result = {
         "notebook_id": None,
         "analysis": None,
