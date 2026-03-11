@@ -69,7 +69,7 @@ def youtube_search(req: YouTubeRequest):
         raise HTTPException(400, "Topic cannot be empty")
 
     count = max(1, min(req.count, 50))
-    query = f"{req.topic} 2025"
+    query = f"{req.topic}"
 
     cmd = [
         sys.executable, "-m", "yt_dlp",
@@ -77,16 +77,26 @@ def youtube_search(req: YouTubeRequest):
         "--no-playlist",
         "--skip-download",
         "--no-warnings",
+        "--extractor-retries", "3",
+        "--socket-timeout", "30",
+        "--no-check-certificates",
         f"ytsearch{count}:{query}"
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=180,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}
+        )
     except subprocess.TimeoutExpired:
-        raise HTTPException(504, "YouTube search timed out — try fewer videos")
+        raise HTTPException(504, "YouTube search timed out — try fewer videos or a simpler topic")
 
-    if result.returncode != 0 and not result.stdout:
-        raise HTTPException(502, f"yt-dlp error: {result.stderr[:300]}")
+    # Log the error for debugging
+    if result.returncode != 0:
+        error_detail = result.stderr[:500] if result.stderr else "No error details"
+        print(f"yt-dlp stderr: {error_detail}")
+        if not result.stdout:
+            raise HTTPException(502, f"YouTube search failed. Error: {error_detail}")
 
     videos = []
     for line in result.stdout.strip().split("\n"):
@@ -109,7 +119,25 @@ def youtube_search(req: YouTubeRequest):
         except (json.JSONDecodeError, KeyError):
             continue
 
+    if not videos:
+        raise HTTPException(502, "No videos found. YouTube may be blocking requests. Try again in a moment.")
+
     return {"videos": videos, "count": len(videos), "topic": req.topic}
+
+
+@app.get("/api/test-ytdlp")
+def test_ytdlp():
+    """Debug endpoint to test if yt-dlp works on this server"""
+    cmd = [sys.executable, "-m", "yt_dlp", "--version"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return {
+            "yt_dlp_version": result.stdout.strip(),
+            "returncode": result.returncode,
+            "error": result.stderr.strip() if result.stderr else None
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/api/notebooklm")
