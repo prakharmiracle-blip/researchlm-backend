@@ -226,42 +226,59 @@ async def notebooklm_pipeline(req: NotebookLMRequest):
         async with await NotebookLMClient.from_storage() as client:
 
             # 1. Create notebook
+            print(f"STEP 1: Creating notebook for topic: {req.topic}")
             nb = await client.notebooks.create(f"Research: {req.topic}")
             result["notebook_id"] = nb.id
+            print(f"STEP 1 OK: notebook_id={nb.id}")
 
-            # 2. Add YouTube sources (up to 25 — NotebookLM limit)
-            urls_to_add = req.urls[:25]
+            # 2. Add YouTube sources (up to 10 to avoid timeout)
+            urls_to_add = req.urls[:10]
+            print(f"STEP 2: Adding {len(urls_to_add)} YouTube sources")
+            added = 0
             for url in urls_to_add:
                 try:
-                    await client.sources.add_url(nb.id, url, wait=True)
-                except Exception:
-                    pass  # Skip failed sources, continue with rest
+                    await client.sources.add_url(nb.id, url, wait=False)
+                    added += 1
+                except Exception as src_err:
+                    print(f"  Source skip: {src_err}")
+            print(f"STEP 2 OK: added {added} sources")
+
+            # Wait a moment for sources to process
+            await asyncio.sleep(5)
 
             # 3. Analysis
             if req.analysis:
+                print("STEP 3: Getting analysis")
                 chat_result = await client.chat.ask(
                     nb.id,
-                    f"What are the top 5–7 key findings, themes, and trends across these "
-                    f"YouTube videos about '{req.topic}'? Be specific and highlight patterns."
+                    f"What are the top 5 key themes and findings across these YouTube videos about '{req.topic}'?"
                 )
                 result["analysis"] = chat_result.answer
+                print("STEP 3 OK: analysis received")
 
             # 4. Infographic
             if req.infographic:
-                status = await client.artifacts.generate_infographic(
-                    nb.id, orientation="portrait", detail_level="detailed"
-                )
-                await client.artifacts.wait_for_completion(nb.id, status.task_id)
+                try:
+                    print("STEP 4: Generating infographic")
+                    status = await client.artifacts.generate_infographic(
+                        nb.id, orientation="portrait", detail_level="brief"
+                    )
+                    print(f"STEP 4: Waiting for infographic task {status.task_id}")
+                    await client.artifacts.wait_for_completion(nb.id, status.task_id)
 
-                # Save to temp file and return as base64 data URL
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                    tmp_path = tmp.name
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                        tmp_path = tmp.name
 
-                await client.artifacts.download_infographic(nb.id, tmp_path)
-                img_data = Path(tmp_path).read_bytes()
-                b64 = base64.b64encode(img_data).decode()
-                result["infographic_url"] = f"data:image/png;base64,{b64}"
-                os.unlink(tmp_path)
+                    await client.artifacts.download_infographic(nb.id, tmp_path)
+                    img_data = Path(tmp_path).read_bytes()
+                    b64 = base64.b64encode(img_data).decode()
+                    result["infographic_url"] = f"data:image/png;base64,{b64}"
+                    os.unlink(tmp_path)
+                    print("STEP 4 OK: infographic ready")
+                except Exception as inf_err:
+                    print(f"STEP 4 FAILED (non-fatal): {inf_err}")
+                    result["infographic_url"] = None
+                    result["infographic_error"] = str(inf_err)[:200]
 
             # 5. Slides
             if req.slides:
