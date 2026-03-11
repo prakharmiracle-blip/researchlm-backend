@@ -1,0 +1,5 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+yt-dlp==2024.12.6
+notebooklm-py[browser]==0.3.3
+python-multipart==0.0.12
